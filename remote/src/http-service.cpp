@@ -49,7 +49,7 @@ using std::exception_ptr;
 using std::current_exception;
 using namespace std::placeholders;
 
-using boost::asio::io_service;
+using boost::asio::io_context;
 using boost::asio::deadline_timer;
 using boost::posix_time::milliseconds;
 
@@ -141,19 +141,19 @@ CurlHeaders convertHeaders(const HttpHeaders& headers) {
 
 //=========================================================================================================
 //
-// io_service thread
+// io_context thread
 
 class IoServiceThread : boost::noncopyable {
 private:
   thread t_;
 
-  static void run(io_service& ioService) { ioService.run(); }
+  static void run(io_context& ioService) { ioService.run(); }
 
 public:
   IoServiceThread() {}
   IoServiceThread(IoServiceThread&& other) : t_(std::move(other.t_)) {}
   IoServiceThread& operator=(IoServiceThread&& other) { t_ = std::move(other.t_); return *this; }
-  IoServiceThread(io_service& ioService) : t_(run, ref(ioService)) {}
+  IoServiceThread(io_context& ioService) : t_(run, ref(ioService)) {}
   ~IoServiceThread() { join(); }
 
   void join() { if (t_.joinable()) t_.join(); }
@@ -295,7 +295,7 @@ private:
   boost::asio::ip::tcp::socket socket_;
   int action_;
 public:
-  Socket(io_service& ioService, boost::asio::ip::tcp tcpSettings) :
+  Socket(io_context& ioService, boost::asio::ip::tcp tcpSettings) :
     socket_(ioService, tcpSettings), action_(CURL_POLL_NONE) {}
   boost::asio::ip::tcp::socket& asioSocket() { return socket_; }
   curl_socket_t nativeSocket() { return socket_.native_handle(); }
@@ -319,7 +319,7 @@ private:
 
   struct CleanupMultiHandle { void operator()(CURLM* h) { curl_multi_cleanup(h); } };
 
-  unique_ptr<io_service> ioService_;
+  unique_ptr<io_context> ioService_;
   IoServiceThread thread_;
   deadline_timer timer_;
   SocketMap sockets_;
@@ -327,7 +327,7 @@ private:
   ConnectionSet activeConnections_;
   Mutex mutex_;
   ConnectionPtr doneHead_;
-  unique_ptr<io_service::work> work_;
+  unique_ptr<boost::asio::executor_work_guard<io_context::executor_type>> work_;
   bool running_;
 
   // libcurl callback implementations -- no locking
@@ -381,7 +381,7 @@ public:
   // external entry point -- locks mutex_
   void addConnection(ConnectionPtr conn);
 
-  // io_service callback function -- locks mutex_
+  // io_context callback function -- locks mutex_
   void socketAction(CURL* easyHandle, curl_socket_t s, int ev_bitmask, const boost::system::error_code& ec);
 };
 
@@ -488,8 +488,8 @@ string curlmcodeMsg(CURLMcode c) {
 //
 
 CurlMultiService::CurlMultiService() :
-ioService_(new io_service),
-    work_(new io_service::work(*ioService_)),
+ioService_(new io_context),
+    work_(std::make_unique<boost::asio::executor_work_guard<io_context::executor_type>>(ioService_->get_executor())),
     timer_(*ioService_),
     multiHandle_(curl_multi_init()),
     mutex_(),

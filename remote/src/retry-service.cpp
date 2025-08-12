@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/foreach.hpp>
@@ -31,7 +31,7 @@ using std::unordered_map;
 using std::weak_ptr;
 using namespace std::placeholders;
 
-using boost::asio::io_service;
+using boost::asio::io_context;
 using boost::asio::deadline_timer;
 using boost::posix_time::milliseconds;
 using boost::system::error_code;
@@ -123,13 +123,13 @@ class IoServiceThread : boost::noncopyable {
 private:
   thread t_;
 
-  static void run(io_service& ioService) { ioService.run(); }
+  static void run(io_context& ioService) { ioService.run(); }
 
 public:
   IoServiceThread() {}
   IoServiceThread(IoServiceThread&& other) : t_(std::move(other.t_)) {}
   IoServiceThread& operator=(IoServiceThread&& other) { t_ = std::move(other.t_); return *this; }
-  explicit IoServiceThread(io_service& ioService) : t_(run, ref(ioService)) {}
+  explicit IoServiceThread(io_context& ioService) : t_(run, ref(ioService)) {}
   ~IoServiceThread() { join(); }
 
   void join() { if (t_.joinable()) t_.join(); }
@@ -138,9 +138,9 @@ public:
 
 class RetryTimerServiceImpl : public enable_shared_from_this<RetryTimerServiceImpl>, public RetryTimerService {
 private:
-  unique_ptr<io_service> ioService_;
+  unique_ptr<io_context> ioService_;
   IoServiceThread thread_;
-  unique_ptr<io_service::work> work_;
+  unique_ptr<boost::asio::executor_work_guard<io_context::executor_type>> work_;
   unordered_map<RetryTimerImpl*, RetryTimerImplWeakPtr> timers_;
   mutex mutex_;
   bool running_;
@@ -169,7 +169,7 @@ private:
   }
 
 public:
-  RetryTimerServiceImpl() : ioService_(new io_service), work_(new io_service::work(*ioService_)), running_(true) {
+  RetryTimerServiceImpl() : ioService_(new io_context), work_(std::make_unique<boost::asio::executor_work_guard<io_context::executor_type>>(ioService_->get_executor())), running_(true) {
     thread_ = IoServiceThread(*ioService_);
   }
 

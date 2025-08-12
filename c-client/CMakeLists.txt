@@ -147,9 +147,8 @@ if(ENABLE_LIBRARY)
     endif()
 
     if(CMAKE_STRIP)
-      get_target_property(DWAVE_SAPI_OUTPUT_NAME dwave_sapi LOCATION)
       add_custom_command(TARGET dwave_sapi POST_BUILD
-          COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} ${DWAVE_SAPI_OUTPUT_NAME}
+          COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} $<TARGET_FILE:dwave_sapi>
           COMMENT "Stripping dwave_sapi c library"
           VERBATIM)
     endif()
